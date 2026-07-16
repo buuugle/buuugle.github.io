@@ -1,0 +1,1126 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Ω-Plane Explorer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#060a0d;
+    --bg-vign: radial-gradient(circle at 50% 40%, #0b1116 0%, #05080a 70%);
+    --panel-bg: rgba(12,17,21,0.86);
+    --panel-border: rgba(255,255,255,0.09);
+    --panel-border-soft: rgba(255,255,255,0.05);
+    --text: #E7ECEE;
+    --text-dim: #7C8A92;
+    --text-dimmer: #4E5A61;
+    --accent: #6EE7D8;
+    --accent-dim: rgba(110,231,216,0.16);
+    --amber: #E8A33D;
+    --amber-dim: rgba(232,163,61,0.16);
+    --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace;
+    --sans: 'Inter', system-ui, -apple-system, sans-serif;
+    --radius: 12px;
+  }
+
+  *{ box-sizing:border-box; }
+  html,body{
+    margin:0; padding:0; width:100%; height:100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    overflow:hidden;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body::before{
+    content:""; position:fixed; inset:0; z-index:0;
+    background: var(--bg-vign);
+    pointer-events:none;
+  }
+
+  #gl{
+    position:fixed; inset:0; width:100%; height:100%;
+    display:block; touch-action:none; cursor:crosshair;
+    z-index:1;
+  }
+  #overlay{
+    position:fixed; inset:0; width:100%; height:100%;
+    pointer-events:none; z-index:2;
+    mix-blend-mode: difference;
+  }
+
+  /* ---------- top-left HUD cluster (brand + live readout, stacked) ---------- */
+  .hud-left{
+    position:fixed; top:18px; left:18px; z-index:5;
+    pointer-events:none;
+    user-select:none;
+    display:flex; flex-direction:column; align-items:flex-start;
+    gap:12px;
+    max-width: 340px;
+  }
+  .hud-left .mark{
+    font-family:var(--mono); font-size:11px; letter-spacing:0.24em;
+    color: var(--accent); text-transform:uppercase; font-weight:600;
+  }
+  .hud-left .title{
+    font-family:var(--sans); font-size:18px; font-weight:700;
+    color: var(--text); margin-top:2px; letter-spacing:-0.01em;
+  }
+
+  /* ---------- live readout (docked under the brand, no overlap with legend) ---------- */
+  .readout{
+    background: var(--panel-bg);
+    border:1px solid var(--panel-border);
+    border-radius: 10px;
+    padding:8px 13px;
+    font-family:var(--mono); font-size:12px;
+    color: var(--text-dim);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    display:flex; align-items:center; gap:9px;
+  }
+  .readout .dot{
+    width:6px; height:6px; border-radius:50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+    flex-shrink:0;
+  }
+  .readout b{ color:var(--text); font-weight:500; }
+  .readout .val{ color:var(--accent); }
+
+  /* ---------- legend (HTML/CSS, not canvas) ---------- */
+  .legend{
+    position:fixed; top:18px; right:18px; z-index:5;
+    background: var(--panel-bg);
+    border:1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 12px 14px 14px;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    pointer-events:none;
+    user-select:none;
+    display:flex; flex-direction:column; align-items:center; gap:9px;
+    transition: opacity 0.2s ease;
+  }
+  .legend.hidden{ display:none; }
+  .legend-title{
+    font-family:var(--mono); font-size:12px; color:var(--text-dim); letter-spacing:0.02em;
+  }
+  .legend-title span{ color:var(--accent); font-weight:600; }
+  .legend-body{
+    display:flex; gap:10px; align-items:stretch;
+  }
+  .legend-bar{
+    width:18px;
+    height: min(240px, 34vh);
+    border-radius:5px;
+    border:1px solid rgba(255,255,255,0.22);
+    display:block;
+  }
+  .legend-ticks{
+    height: min(240px, 34vh);
+    display:flex; flex-direction:column; justify-content:space-between;
+    font-family:var(--mono); font-size:11.5px; color:var(--text-dim);
+  }
+  .legend-ticks span{ line-height:1; white-space:nowrap; }
+
+  /* ---------- control deck ---------- */
+  .deck{
+    position:fixed; left:18px; bottom:18px; z-index:5;
+    width: 302px;
+    max-height: calc(100vh - 100px);
+    background: var(--panel-bg);
+    border:1px solid var(--panel-border);
+    border-radius: var(--radius);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+    overflow:hidden;
+    transition: transform 0.28s cubic-bezier(.2,.8,.2,1), opacity 0.28s ease;
+  }
+  .deck.hidden{
+    transform: translateY(calc(100% + 30px));
+    opacity:0;
+    pointer-events:none;
+  }
+  .deck-scroll{
+    max-height: calc(100vh - 100px);
+    overflow-y:auto;
+    padding: 16px 16px 14px;
+  }
+  .deck-scroll::-webkit-scrollbar{ width:6px; }
+  .deck-scroll::-webkit-scrollbar-thumb{ background: rgba(255,255,255,0.12); border-radius:3px; }
+
+  .deck-head{
+    display:flex; align-items:center; justify-content:space-between;
+    margin-bottom:14px;
+  }
+  .deck-head .lbl{
+    font-family:var(--mono); font-size:10.5px; letter-spacing:0.18em;
+    color:var(--text-dimmer); text-transform:uppercase;
+  }
+
+  .select-wrap{
+    position:relative;
+    margin-bottom:16px;
+  }
+  .select-wrap select{
+    width:100%; appearance:none; -webkit-appearance:none; -moz-appearance:none;
+    background: rgba(255,255,255,0.045);
+    border:1px solid var(--panel-border-soft);
+    border-radius:8px;
+    color: var(--text);
+    font-family:var(--mono); font-size:13px; font-weight:500;
+    padding:10px 34px 10px 12px;
+    cursor:pointer;
+    transition: all 0.15s ease;
+  }
+  .select-wrap select:hover{
+    border-color: var(--panel-border);
+    background: rgba(255,255,255,0.075);
+  }
+  .select-wrap select:focus{
+    outline:none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(110,231,216,0.16);
+  }
+  .select-wrap select option{
+    background: #0d1215;
+    color: var(--text);
+  }
+  .select-wrap::after{
+    content:"";
+    position:absolute; right:13px; top:44%;
+    width:7px; height:7px;
+    border-right:1.5px solid var(--text-dim);
+    border-bottom:1.5px solid var(--text-dim);
+    transform: translateY(-50%) rotate(45deg);
+    pointer-events:none;
+  }
+
+  .row{ margin-bottom: 13px; }
+  .row-head{
+    display:flex; justify-content:space-between; align-items:baseline;
+    margin-bottom:6px;
+  }
+  .row-head label{
+    font-family:var(--sans); font-size:11.5px; color:var(--text-dim);
+    text-transform:uppercase; letter-spacing:0.06em; font-weight:500;
+  }
+  .row-head .v{
+    font-family:var(--mono); font-size:12px; color:var(--accent);
+    font-weight:500;
+  }
+
+  input[type=range]{
+    -webkit-appearance:none; appearance:none;
+    width:100%; height:3px; border-radius:2px;
+    background: rgba(255,255,255,0.12);
+    outline:none; cursor:pointer; margin:0;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none; appearance:none;
+    width:14px; height:14px; border-radius:50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 3px rgba(110,231,216,0.18), 0 2px 4px rgba(0,0,0,0.4);
+    cursor:pointer; margin-top:-5.5px;
+    transition: box-shadow 0.15s ease;
+  }
+  input[type=range]::-webkit-slider-thumb:hover{ box-shadow: 0 0 0 5px rgba(110,231,216,0.25); }
+  input[type=range]::-moz-range-thumb{
+    width:14px; height:14px; border-radius:50%; border:none;
+    background: var(--accent);
+    box-shadow: 0 0 0 3px rgba(110,231,216,0.18);
+    cursor:pointer;
+  }
+  input[type=range]::-moz-range-track{ height:3px; border-radius:2px; background: rgba(255,255,255,0.12); }
+
+  .divider{ height:1px; background: var(--panel-border-soft); margin: 14px 0; }
+
+  .pair{ display:flex; gap:10px; }
+  .pair .row{ flex:1; }
+
+  .toggle-row{
+    display:flex; align-items:center; justify-content:space-between;
+    padding: 8px 0;
+  }
+  .toggle-row span{
+    font-family:var(--sans); font-size:12.5px; color:var(--text);
+    font-weight:500;
+  }
+  .switch{
+    position:relative; width:36px; height:20px; flex-shrink:0;
+    border-radius: 999px; background: rgba(255,255,255,0.12);
+    cursor:pointer; transition: background 0.15s ease;
+    border:1px solid var(--panel-border-soft);
+  }
+  .switch.on{ background: var(--accent-dim); border-color: rgba(110,231,216,0.4); }
+  .switch::after{
+    content:""; position:absolute; top:2px; left:2px;
+    width:14px; height:14px; border-radius:50%;
+    background: var(--text-dimmer);
+    transition: transform 0.18s cubic-bezier(.2,.8,.2,1), background 0.15s ease;
+  }
+  .switch.on::after{ transform: translateX(16px); background: var(--accent); }
+
+  .btn-row{ display:flex; gap:8px; margin-top:4px; }
+  .btn{
+    flex:1; font-family:var(--mono); font-size:11.5px; letter-spacing:0.04em;
+    color: var(--text-dim); background: rgba(255,255,255,0.04);
+    border:1px solid var(--panel-border-soft); border-radius:7px;
+    padding:9px 0; cursor:pointer; text-transform:uppercase;
+    transition: all 0.15s ease;
+  }
+  .btn:hover{ color:var(--text); background: rgba(255,255,255,0.08); border-color: var(--panel-border); }
+
+  .hint{
+    font-family:var(--sans); font-size:10.5px; color:var(--text-dimmer);
+    margin-top:12px; line-height:1.5; text-align:center;
+  }
+  .hint kbd{
+    font-family:var(--mono); background: rgba(255,255,255,0.06);
+    padding:1px 5px; border-radius:4px; border:1px solid var(--panel-border-soft);
+    color:var(--text-dim);
+  }
+
+  /* ---------- toggle FAB ---------- */
+  .fab{
+    position:fixed; right:18px; bottom:18px; z-index:6;
+    width:44px; height:44px; border-radius:50%;
+    background: var(--panel-bg); border:1px solid var(--panel-border);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer; box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+    transition: transform 0.15s ease, border-color 0.15s ease;
+  }
+  .fab:hover{ border-color: var(--accent); transform: scale(1.05); }
+  .fab svg{ width:19px; height:19px; stroke: var(--text-dim); }
+  .fab:hover svg{ stroke: var(--accent); }
+
+  @media (max-width: 480px){
+    .hud-left{ top:12px; left:12px; max-width:62vw; gap:8px; }
+    .readout{ font-size:10px; padding:6px 10px; }
+    .legend{ top:12px; right:12px; padding:9px 11px 11px; }
+    .legend-bar, .legend-ticks{ height:min(150px, 26vh); }
+    .deck{ left:12px; right:12px; width:auto; bottom:12px; }
+    .fab{ right:12px; bottom:12px; }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="gl"></canvas>
+<canvas id="overlay"></canvas>
+
+<div class="hud-left">
+  <div>
+    <div class="mark">Ω-plane</div>
+    <div class="title">Explorer</div>
+  </div>
+  <div class="readout" id="readout">
+    <span class="dot"></span>
+    <span>ω = <b id="ro-omega">0.0000 + 0.0000i</b> &nbsp; |<b id="ro-fn">G</b>(ω)| = <span class="val" id="ro-val">0.000e+0</span></span>
+  </div>
+</div>
+
+<div class="legend" id="legend">
+  <div class="legend-title">|<span id="lg-fn">G</span>(ω)|</div>
+  <div class="legend-body">
+    <canvas class="legend-bar" id="legend-bar"></canvas>
+    <div class="legend-ticks" id="legend-ticks"></div>
+  </div>
+</div>
+
+<div class="deck" id="deck">
+  <div class="deck-scroll">
+    <div class="deck-head">
+      <span class="lbl">Parameters</span>
+      <span class="lbl" id="deck-close" style="cursor:pointer;">✕</span>
+    </div>
+
+    <div class="select-wrap">
+      <select id="func-select" aria-label="Function"></select>
+    </div>
+
+    <div class="row">
+      <div class="row-head"><label>Potential V</label><span class="v" id="v-V">4.00</span></div>
+      <input type="range" id="s-V" min="-30" max="30" step="0.01" value="4">
+    </div>
+    <div class="row">
+      <div class="row-head"><label>Mass m</label><span class="v" id="v-m">1.00</span></div>
+      <input type="range" id="s-m" min="0" max="20" step="0.01" value="1">
+    </div>
+    <div class="pair">
+      <div class="row">
+        <div class="row-head"><label>Length L+</label><span class="v" id="v-Lp">2.00</span></div>
+        <input type="range" id="s-Lp" min="0" max="20" step="0.01" value="2">
+      </div>
+      <div class="row">
+        <div class="row-head"><label>Length L−</label><span class="v" id="v-Lm">1.00</span></div>
+        <input type="range" id="s-Lm" min="0" max="20" step="0.01" value="1">
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="row">
+      <div class="row-head"><label>Zoom</label><span class="v" id="v-zoom">1.00×</span></div>
+      <input type="range" id="s-zoom" min="0.05" max="20" step="0.01" value="1">
+    </div>
+    <div class="pair">
+      <div class="row">
+        <div class="row-head"><label>Center Re</label><span class="v" id="v-cx">0.00</span></div>
+        <input type="range" id="s-cx" min="-5" max="5" step="0.01" value="0">
+      </div>
+      <div class="row">
+        <div class="row-head"><label>Center Im</label><span class="v" id="v-cy">0.00</span></div>
+        <input type="range" id="s-cy" min="-5" max="5" step="0.01" value="0">
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="toggle-row">
+      <span>Axes</span>
+      <div class="switch on" id="t-axes"></div>
+    </div>
+    <div class="toggle-row">
+      <span>Legend</span>
+      <div class="switch on" id="t-legend"></div>
+    </div>
+    <div class="toggle-row">
+      <span>Manual scale max</span>
+      <div class="switch on" id="t-manual"></div>
+    </div>
+    <div class="row" id="row-manual" style="display:block; margin-top:2px;">
+      <div class="row-head"><label>Max value</label><span class="v" id="v-manual">150.000</span></div>
+      <input type="range" id="s-manual" min="0.0001" max="450" step="0.0001" value="150">
+    </div>
+    <div class="row" style="margin-top:8px;">
+      <div class="row-head"><label>Auto max</label><span class="v" id="v-automax">1.000</span></div>
+    </div>
+
+    <div class="btn-row">
+      <div class="btn" id="btn-reset">Reset view</div>
+    </div>
+    <div class="hint">Drag to pan · scroll / pinch to zoom · <kbd>Esc</kbd> toggles this panel</div>
+  </div>
+</div>
+
+<div class="fab" id="fab" title="Toggle controls">
+  <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="3"></circle>
+    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+  </svg>
+</div>
+
+<script>
+"use strict";
+
+/* =========================================================================
+   Complex arithmetic (mirrors the GLSL helpers, used on the CPU only to
+   find the dynamic-range max for colour normalisation — the actual field
+   is evaluated per-pixel on the GPU by the fragment shader below).
+   ========================================================================= */
+const C = (re, im = 0) => ({ re, im });
+const cAdd = (a, b) => C(a.re + b.re, a.im + b.im);
+const cSub = (a, b) => C(a.re - b.re, a.im - b.im);
+const cMul = (a, b) => C(a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re);
+const cScale = (a, s) => C(a.re * s, a.im * s);
+const cDiv = (a, b) => { const d = (b.re * b.re + b.im * b.im) || 1e-12; return C((a.re * b.re + a.im * b.im) / d, (a.im * b.re - a.re * b.im) / d); };
+const cAbs = (a) => Math.hypot(a.re, a.im);
+function cSqrt(a) {
+  const r = Math.hypot(a.re, a.im);
+  let re = Math.sqrt(Math.max((r + a.re) * 0.5, 0));
+  let im = Math.sqrt(Math.max((r - a.re) * 0.5, 0));
+  if (a.im < 0) im = -im;
+  return C(re, im);
+}
+const cCos = (a) => C(Math.cos(a.re) * Math.cosh(a.im), -Math.sin(a.re) * Math.sinh(a.im));
+const cSin = (a) => C(Math.sin(a.re) * Math.cosh(a.im), Math.cos(a.re) * Math.sinh(a.im));
+function cSinc(z) {
+  const mag2 = z.re * z.re + z.im * z.im;
+  if (mag2 < 1e-6) {
+    const z2 = cMul(z, z), z4 = cMul(z2, z2);
+    return C(1 - z2.re / 6 + z4.re / 120, -z2.im / 6 + z4.im / 120);
+  }
+  return cDiv(cSin(z), z);
+}
+const kOf = (w, m) => cSqrt(cSub(cMul(w, w), C(m * m, 0)));
+
+function evaluateG(x, y, p) {
+  const omega = C(x, y), omegaA = C(x - p.V, y);
+  const kOmega = kOf(omega, p.m), kOmegaA = kOf(omegaA, p.m);
+  const cosKoLp = cCos(cScale(kOmega, p.Lp));
+  const cosKaLm = cCos(cScale(kOmegaA, p.Lm));
+  const sincKaLm = cSinc(cScale(kOmegaA, p.Lm));
+  const sincKoLp = cSinc(cScale(kOmega, p.Lp));
+  const term1 = cScale(cMul(cosKoLp, sincKaLm), p.Lm);
+  const term2 = cScale(cMul(cosKaLm, sincKoLp), p.Lp);
+  return cAbs(cAdd(term1, term2));
+}
+function evaluateF(x, y, p) {
+  const omega = C(x, y), omegaA = C(x - p.V, y);
+  const kOmega = kOf(omega, p.m), kOmegaA = kOf(omegaA, p.m);
+  const kOLp = cScale(kOmega, p.Lp), kALm = cScale(kOmegaA, p.Lm);
+  const sincKOLp = cScale(cSinc(kOLp), p.Lp);
+  const sincKALm = cScale(cSinc(kALm), p.Lm);
+  const sinKALm = cSin(kALm), cosKALm = cCos(kALm), cosKOLp = cCos(kOLp);
+  const iOmega = cMul(C(0, 1), omega);
+  const bracket1 = cAdd(cMul(kOmegaA, sinKALm), cMul(iOmega, cosKALm));
+  const term1 = cMul(sincKOLp, bracket1);
+  const bracket2 = cSub(cMul(iOmega, sincKALm), cosKALm);
+  const term2 = cMul(cosKOLp, bracket2);
+  return cAbs(cAdd(term1, term2));
+}
+
+/* =========================================================================
+   Function registry — the single source of truth for what shows up in the
+   dropdown. To add a new function later:
+     1. In FRAG_SRC below, write `float evaluate_H(vec2 p) { ... }` (GLSL,
+        this is what actually runs on the GPU) and add an `else if
+        (func_mode == 2) return evaluate_H(p);` branch inside
+        evaluate_function().
+     2. Here, write the matching CPU version `function evaluateH(x,y,p){...}`
+        (JS, only used to find the colour-scale max — it must compute the
+        exact same formula as step 1).
+     3. Add one line below: `{ symbol:'H', label:'H(ω) — ...', eval: evaluateH }`.
+   The dropdown, the live readout and the legend all read from this array
+   automatically — nothing else needs to change.
+   ========================================================================= */
+const FUNCTIONS = [
+  { symbol: 'F', label: 'Dirichlet', eval: evaluateG },
+  { symbol: 'F', label: 'Sommerfeld', eval: evaluateF },
+];
+function evaluateField(x, y, p) { return FUNCTIONS[p.funcMode].eval(x, y, p); }
+
+/* =========================================================================
+   viridis colormap (same polynomial fit as the shader) — used for the
+   legend gradient drawn on the 2D overlay.
+   ========================================================================= */
+function viridis(t) {
+  t = Math.min(1, Math.max(0, t));
+  const cs = [
+    [-5.4354, 4.6459, 26.3124], [4.7763, -13.7451, -65.3529], [6.2282, 14.1799, 56.6905],
+    [-4.6342, -5.7991, -19.3324], [-0.3308, 0.2148, 0.0954], [0.1050, 1.4046, 1.3845]
+  ];
+  let r = cs[0][0], g = cs[0][1], b = cs[0][2];
+  for (let i = 1; i < cs.length; i++) { r = r * t + cs[i][0]; g = g * t + cs[i][1]; b = b * t + cs[i][2]; }
+  r = r * t + 0.2777; g = g * t + 0.0055; b = b * t + 0.3341;
+  return [Math.min(1, Math.max(0, r)), Math.min(1, Math.max(0, g)), Math.min(1, Math.max(0, b))];
+}
+
+/* =========================================================================
+   Shaders — GLSL ES 3.00 (WebGL2), logic identical to the desktop version.
+   ========================================================================= */
+const VERT_SRC = `#version 300 es
+in vec2 in_position;
+void main() {
+  gl_Position = vec4(in_position, 0.0, 1.0);
+}`;
+
+const FRAG_SRC = `#version 300 es
+precision highp float;
+precision highp int;
+
+uniform vec2  resolution;
+uniform vec2  center;
+uniform float zoom;
+
+uniform float V;
+uniform float m;
+uniform float Lp;
+uniform float Lm;
+uniform float value_max;
+uniform int   func_mode;
+
+out vec4 fragColor;
+
+vec2 toPlane(vec2 fragCoord) {
+    vec2 uv = (fragCoord - 0.5 * resolution) / resolution.y;
+    uv = uv / zoom + center;
+    return uv;
+}
+
+vec2 cmul(vec2 a, vec2 b) { return vec2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x); }
+vec2 cdiv(vec2 a, vec2 b) {
+    float d = max(dot(b, b), 1e-12);
+    return vec2(a.x * b.x + a.y * b.y, a.y * b.x - a.x * b.y) / d;
+}
+vec2 csqrt(vec2 z) {
+    float r = length(z);
+    float re = sqrt(max((r + z.x) * 0.5, 0.0));
+    float im = sqrt(max((r - z.x) * 0.5, 0.0));
+    im = (z.y < 0.0) ? -im : im;
+    return vec2(re, im);
+}
+vec2 ccos(vec2 z) { return vec2(cos(z.x) * cosh(z.y), -sin(z.x) * sinh(z.y)); }
+vec2 csin(vec2 z) { return vec2(sin(z.x) * cosh(z.y), cos(z.x) * sinh(z.y)); }
+vec2 csinc(vec2 z) {
+    float mag2 = dot(z, z);
+    if (mag2 < 1e-6) {
+        vec2 z2 = cmul(z, z);
+        vec2 z4 = cmul(z2, z2);
+        return vec2(1.0, 0.0) - z2 / 6.0 + z4 / 120.0;
+    }
+    return cdiv(csin(z), z);
+}
+vec2 k_of(vec2 w) {
+    vec2 w2 = cmul(w, w);
+    return csqrt(w2 - vec2(m * m, 0.0));
+}
+
+float evaluate_G(vec2 p) {
+    vec2 omega  = p;
+    vec2 omegaA = vec2(p.x - V, p.y);
+    vec2 k_omega  = k_of(omega);
+    vec2 k_omegaA = k_of(omegaA);
+    vec2 cosKoLp = ccos(cmul(k_omega,  vec2(Lp, 0.0)));
+    vec2 cosKaLm = ccos(cmul(k_omegaA, vec2(Lm, 0.0)));
+    vec2 sincKaLm = csinc(cmul(k_omegaA, vec2(Lm, 0.0)));
+    vec2 sincKoLp = csinc(cmul(k_omega,  vec2(Lp, 0.0)));
+    vec2 term1 = cmul(cosKoLp, sincKaLm) * Lm;
+    vec2 term2 = cmul(cosKaLm, sincKoLp) * Lp;
+    vec2 G = term1 + term2;
+    return length(G);
+}
+
+float evaluate_F(vec2 p) {
+    vec2 omega  = p;
+    vec2 omegaA = vec2(p.x - V, p.y);
+    vec2 k_omega  = k_of(omega);
+    vec2 k_omegaA = k_of(omegaA);
+    vec2 kOLp = cmul(k_omega,  vec2(Lp, 0.0));
+    vec2 kALm = cmul(k_omegaA, vec2(Lm, 0.0));
+    vec2 sincKOLp = csinc(kOLp) * Lp;
+    vec2 sincKALm = csinc(kALm) * Lm;
+    vec2 sinKALm  = csin(kALm);
+    vec2 cosKALm  = ccos(kALm);
+    vec2 cosKOLp  = ccos(kOLp);
+    vec2 iOmega = cmul(vec2(0.0, 1.0), omega);
+    vec2 bracket1 = cmul(k_omegaA, sinKALm) + cmul(iOmega, cosKALm);
+    vec2 term1 = cmul(sincKOLp, bracket1);
+    vec2 bracket2 = cmul(iOmega, sincKALm) - cosKALm;
+    vec2 term2 = cmul(cosKOLp, bracket2);
+    vec2 F = term1 + term2;
+    return length(F);
+}
+
+// Dispatch by func_mode. To add a function, write evaluate_H(vec2 p) above
+// and add "else if (func_mode == 2) return evaluate_H(p);" here — then do
+// the matching JS half described next to the FUNCTIONS registry below.
+float evaluate_function(vec2 p) {
+    if (func_mode == 0) return evaluate_G(p);
+    else                return evaluate_F(p);
+}
+
+vec3 viridis(float t) {
+    t = clamp(t, 0.0, 1.0);
+    const vec3 c0 = vec3(0.2777, 0.0055, 0.3341);
+    const vec3 c1 = vec3(0.1050, 1.4046, 1.3845);
+    const vec3 c2 = vec3(-0.3308, 0.2148, 0.0954);
+    const vec3 c3 = vec3(-4.6342, -5.7991, -19.3324);
+    const vec3 c4 = vec3(6.2282, 14.1799, 56.6905);
+    const vec3 c5 = vec3(4.7763, -13.7451, -65.3529);
+    const vec3 c6 = vec3(-5.4354, 4.6459, 26.3124);
+    return c0 + t*(c1 + t*(c2 + t*(c3 + t*(c4 + t*(c5 + t*c6)))));
+}
+
+void main() {
+    vec2 p = toPlane(gl_FragCoord.xy);
+    float f = evaluate_function(p);
+    float eps = max(value_max * 1e-4, 1e-8);
+    float logMin = log(eps);
+    float logMax = log(value_max + eps);
+    float t = (log(f + eps) - logMin) / max(logMax - logMin, 1e-6);
+    t = clamp(t, 0.0, 1.0);
+    vec3 col = viridis(t);
+    fragColor = vec4(col, 1.0);
+}`;
+
+/* =========================================================================
+   WebGL2 setup
+   ========================================================================= */
+const canvas = document.getElementById('gl');
+const gl = canvas.getContext('webgl2', { antialias: false, preserveDrawingBuffer: false, alpha: false });
+if (!gl) {
+  document.body.innerHTML = '<div style="padding:40px;font-family:sans-serif;color:#eee;">WebGL2 is not available in this browser.</div>';
+  throw new Error('WebGL2 unavailable');
+}
+
+function compileShader(type, src) {
+  const sh = gl.createShader(type);
+  gl.shaderSource(sh, src);
+  gl.compileShader(sh);
+  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+    console.error(gl.getShaderInfoLog(sh));
+    throw new Error('Shader compile error: ' + gl.getShaderInfoLog(sh));
+  }
+  return sh;
+}
+const vs = compileShader(gl.VERTEX_SHADER, VERT_SRC);
+const fs = compileShader(gl.FRAGMENT_SHADER, FRAG_SRC);
+const program = gl.createProgram();
+gl.attachShader(program, vs);
+gl.attachShader(program, fs);
+gl.linkProgram(program);
+if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+  console.error(gl.getProgramInfoLog(program));
+  throw new Error('Program link error');
+}
+gl.useProgram(program);
+
+const vao = gl.createVertexArray();
+gl.bindVertexArray(vao);
+const vbo = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+const posLoc = gl.getAttribLocation(program, 'in_position');
+gl.enableVertexAttribArray(posLoc);
+gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+const U = {};
+['resolution', 'center', 'zoom', 'V', 'm', 'Lp', 'Lm', 'value_max', 'func_mode'].forEach(n => {
+  U[n] = gl.getUniformLocation(program, n);
+});
+
+/* =========================================================================
+   State
+   ========================================================================= */
+const params = {
+  center: [0.0, 0.0],
+  zoom: 1.0,
+  V: 4.0,
+  m: 1.0,
+  Lp: 2.0,
+  Lm: 1.0,
+  showAxes: true,
+  showLegend: true,
+  manualMaxEnabled: true,
+  manualMaxValue: 150.0,
+  valueMax: 1.0,
+  funcMode: 0,
+};
+
+/* =========================================================================
+   Canvas / overlay sizing
+   ========================================================================= */
+const overlay = document.getElementById('overlay');
+const octx = overlay.getContext('2d');
+
+function sizeCanvases() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = Math.max(1, Math.floor(canvas.clientWidth * dpr));
+  const h = Math.max(1, Math.floor(canvas.clientHeight * dpr));
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  const ow = Math.max(1, Math.floor(overlay.clientWidth * dpr));
+  const oh = Math.max(1, Math.floor(overlay.clientHeight * dpr));
+  if (overlay.width !== ow || overlay.height !== oh) { overlay.width = ow; overlay.height = oh; }
+}
+window.addEventListener('resize', () => { sizeCanvases(); drawLegendBar(); scheduleRecomputeMax(); });
+
+/* =========================================================================
+   Dynamic-range max (CPU sample, mirrors the desktop app's numpy pass)
+   ========================================================================= */
+function computeValueMax(resolution = 72) {
+  const aspect = canvas.width / canvas.height || 1;
+  const xHalf = 0.5 * aspect / params.zoom;
+  const yHalf = 0.5 / params.zoom;
+  let max = 0;
+  for (let j = 0; j < resolution; j++) {
+    const y = params.center[1] - yHalf + (2 * yHalf) * (j / (resolution - 1));
+    for (let i = 0; i < resolution; i++) {
+      const x = params.center[0] - xHalf + (2 * xHalf) * (i / (resolution - 1));
+      const f = evaluateField(x, y, params);
+      if (f > max) max = f;
+    }
+  }
+  params.valueMax = max > 1e-6 ? max : 1.0;
+  document.getElementById('v-automax').textContent = params.valueMax.toFixed(3);
+  const manualSlider = document.getElementById('s-manual');
+  const newMax = Math.max(params.valueMax * 3.0, params.manualMaxValue, 1e-3);
+  manualSlider.max = String(newMax);
+  updateLegend();
+}
+let recomputeTimer = null;
+function scheduleRecomputeMax(delay = 55) {
+  clearTimeout(recomputeTimer);
+  recomputeTimer = setTimeout(computeValueMax, delay);
+}
+
+/* =========================================================================
+   Overlay drawing: axis ticks/labels + colour legend (canvas 2D)
+   ========================================================================= */
+function computeStep(unitPixels) {
+  const targetPixels = 80.0;
+  const rawStep = targetPixels / unitPixels;
+  const exponent = Math.floor(Math.log10(rawStep));
+  const base = Math.pow(10, exponent);
+  const ratio = rawStep / base;
+  if (ratio < 2.0) return base;
+  if (ratio < 5.0) return 2.0 * base;
+  return 5.0 * base;
+}
+function formatValue(value, step) {
+  if (Math.abs(value) < step * 0.001) value = 0;
+  const decimals = step >= 1.0 ? 0 : Math.max(0, -Math.floor(Math.log10(step)));
+  let text = value.toFixed(decimals);
+  if (decimals > 0) {
+    text = text.replace(/0+$/, '').replace(/\.$/, '');
+    if (text === '' || text === '-') text = '0';
+  }
+  return text;
+}
+function formatLegendValue(value) {
+  if (value <= 0) return '0';
+  const av = Math.abs(value);
+  if (av >= 1000 || av < 0.001) return value.toExponential(2);
+  if (av >= 100) return value.toFixed(0);
+  if (av >= 10) return value.toFixed(1);
+  return value.toFixed(2);
+}
+function drawLabel(ctx, x, y, text, align = 'left', baseline = 'top') {
+  ctx.textAlign = align; ctx.textBaseline = baseline;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(text, x, y);
+}
+
+/**
+ * Grid + axes, drawn entirely on the 2D overlay (never baked into the GPU
+ * color map): faint minor/major gridlines, glowing Re=0 / Im=0 axes, and
+ * tick labels that hug the visible axis (or clamp to the nearest edge when
+ * the origin is off-screen), Desmos-style.
+ */
+function drawGrid(ctx, w, h) {
+  if (h === 0 || params.zoom <= 0) return;
+  const aspect = w / h;
+  const unitPixels = h * params.zoom;
+  const step = computeStep(unitPixels);
+  const majorEvery = 5;
+  const xHalf = 0.5 * aspect / params.zoom, yHalf = 0.5 / params.zoom;
+  const xMin = params.center[0] - xHalf, xMax = params.center[0] + xHalf;
+  const yMin = params.center[1] - yHalf, yMax = params.center[1] + yHalf;
+
+  function planeToScreen(px, py) {
+    const ux = (px - params.center[0]) * params.zoom;
+    const uy = (py - params.center[1]) * params.zoom;
+    const fragX = ux * h + 0.5 * w;
+    const fragY = uy * h + 0.5 * h;
+    return [fragX, h - fragY];
+  }
+  const [originX, originY] = planeToScreen(0, 0);
+
+  let nMin = Math.floor(xMin / step) - 1, nMax = Math.ceil(xMax / step) + 1;
+  for (let n = nMin; n <= nMax; n++) {
+    const value = n * step;
+    if (Math.abs(value) < step * 0.01) continue;
+    const [sx] = planeToScreen(value, 0);
+    ctx.beginPath(); ctx.moveTo(sx + 0.5, 0); ctx.lineTo(sx + 0.5, h);
+    ctx.strokeStyle = (n % majorEvery === 0) ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.18)';
+    ctx.lineWidth = 1; ctx.stroke();
+  }
+  nMin = Math.floor(yMin / step) - 1; nMax = Math.ceil(yMax / step) + 1;
+  for (let n = nMin; n <= nMax; n++) {
+    const value = n * step;
+    if (Math.abs(value) < step * 0.01) continue;
+    const [, sy] = planeToScreen(0, value);
+    ctx.beginPath(); ctx.moveTo(0, sy + 0.5); ctx.lineTo(w, sy + 0.5);
+    ctx.strokeStyle = (n % majorEvery === 0) ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.18)';
+    ctx.lineWidth = 1; ctx.stroke();
+  }
+
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 1.3;
+  if (originX >= -2 && originX <= w + 2) { ctx.beginPath(); ctx.moveTo(originX + 0.5, 0); ctx.lineTo(originX + 0.5, h); ctx.stroke(); }
+  if (originY >= -2 && originY <= h + 2) { ctx.beginPath(); ctx.moveTo(0, originY + 0.5); ctx.lineTo(w, originY + 0.5); ctx.stroke(); }
+
+  const textH = 14, margin = 4;
+  const labelY = originY < margin ? margin : (originY > h - margin - textH ? h - margin - textH : originY + 9);
+  let labelX, yAlign;
+  if (originX < margin) { labelX = margin; yAlign = 'left'; }
+  else if (originX > w - margin) { labelX = w - margin; yAlign = 'right'; }
+  else { labelX = originX - 9; yAlign = 'right'; }
+  const axisY = Math.min(Math.max(originY, 0), h);
+  const axisX = Math.min(Math.max(originX, 0), w);
+
+  ctx.font = '12px "IBM Plex Mono", monospace';
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 1.3;
+
+  nMin = Math.floor(xMin / step) - 1; nMax = Math.ceil(xMax / step) + 1;
+  for (let n = nMin; n <= nMax; n++) {
+    if (n % majorEvery !== 0) continue;
+    const value = n * step;
+    if (Math.abs(value) < step * 0.01) continue;
+    const [sx] = planeToScreen(value, 0);
+    ctx.beginPath(); ctx.moveTo(sx + 0.5, axisY - 5); ctx.lineTo(sx + 0.5, axisY + 5); ctx.stroke();
+    drawLabel(ctx, sx, labelY, formatValue(value, step), 'center', 'top');
+  }
+  nMin = Math.floor(yMin / step) - 1; nMax = Math.ceil(yMax / step) + 1;
+  for (let n = nMin; n <= nMax; n++) {
+    if (n % majorEvery !== 0) continue;
+    const value = n * step;
+    if (Math.abs(value) < step * 0.01) continue;
+    const [, sy] = planeToScreen(0, value);
+    ctx.beginPath(); ctx.moveTo(axisX - 5, sy + 0.5); ctx.lineTo(axisX + 5, sy + 0.5); ctx.stroke();
+    drawLabel(ctx, labelX, sy - textH / 2, formatValue(value, step), yAlign, 'top');
+  }
+  drawLabel(ctx, labelX, labelY, '0', yAlign, 'top');
+}
+
+function drawOverlay() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  octx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  octx.clearRect(0, 0, overlay.clientWidth, overlay.clientHeight);
+  if (params.showAxes) drawGrid(octx, overlay.clientWidth, overlay.clientHeight);
+}
+
+/**
+ * Legend — a real HTML/CSS element (gradient bar + flex-spaced tick
+ * labels) rather than something painted into the canvas, so it lays out
+ * and stays crisp like the rest of the interface.
+ */
+const legendBarEl = document.getElementById('legend-bar');
+const legendTicksEl = document.getElementById('legend-ticks');
+const legendFnEl = document.getElementById('lg-fn');
+const legendEl = document.getElementById('legend');
+const legendBarCtx = legendBarEl.getContext('2d');
+
+function drawLegendBar() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const rect = legendBarEl.getBoundingClientRect();
+  const w = Math.max(1, Math.round(rect.width * dpr));
+  const h = Math.max(1, Math.round(rect.height * dpr));
+  if (legendBarEl.width !== w || legendBarEl.height !== h) { legendBarEl.width = w; legendBarEl.height = h; }
+  legendBarCtx.clearRect(0, 0, w, h);
+  // Gradient line runs from the bottom (t=0, low value, purple) to the top (t=1, high value, yellow).
+  const grad = legendBarCtx.createLinearGradient(0, h, 0, 0);
+  const steps = 32;
+  for (let s = 0; s <= steps; s++) {
+    const t = s / steps;
+    const [r, g, b] = viridis(t);
+    grad.addColorStop(t, `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`);
+  }
+  legendBarCtx.fillStyle = grad;
+  legendBarCtx.fillRect(0, 0, w, h);
+}
+
+function updateLegend() {
+  legendFnEl.textContent = FUNCTIONS[params.funcMode].symbol;
+  const valueMaxEff = params.manualMaxEnabled ? params.manualMaxValue : params.valueMax;
+  const eps = Math.max(valueMaxEff * 1e-4, 1e-8);
+  const logMin = Math.log(eps), logMax = Math.log(valueMaxEff + eps);
+  const nTicks = 5;
+  legendTicksEl.innerHTML = '';
+  for (let i = nTicks - 1; i >= 0; i--) {
+    const t = i / (nTicks - 1);
+    let fVal = Math.exp(t * (logMax - logMin) + logMin) - eps;
+    fVal = Math.max(fVal, 0);
+    const span = document.createElement('span');
+    span.textContent = formatLegendValue(fVal);
+    legendTicksEl.appendChild(span);
+  }
+}
+
+/* =========================================================================
+   Render loop
+   ========================================================================= */
+function render() {
+  sizeCanvases();
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.useProgram(program);
+  gl.bindVertexArray(vao);
+  gl.uniform2f(U.resolution, canvas.width, canvas.height);
+  gl.uniform2f(U.center, params.center[0], params.center[1]);
+  gl.uniform1f(U.zoom, params.zoom);
+  gl.uniform1f(U.V, params.V);
+  gl.uniform1f(U.m, params.m);
+  gl.uniform1f(U.Lp, params.Lp);
+  gl.uniform1f(U.Lm, params.Lm);
+  gl.uniform1f(U.value_max, params.manualMaxEnabled ? params.manualMaxValue : params.valueMax);
+  gl.uniform1i(U.func_mode, params.funcMode);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+  drawOverlay();
+  requestAnimationFrame(render);
+}
+
+/* =========================================================================
+   Live cursor readout
+   ========================================================================= */
+const roOmega = document.getElementById('ro-omega');
+const roFn = document.getElementById('ro-fn');
+const roVal = document.getElementById('ro-val');
+function screenToPlane(mx, my) {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  const fragX = mx, fragY = h - my;
+  const ux = (fragX - 0.5 * w) / h;
+  const uy = (fragY - 0.5 * h) / h;
+  return [ux / params.zoom + params.center[0], uy / params.zoom + params.center[1]];
+}
+function updateReadout(mx, my) {
+  const [px, py] = screenToPlane(mx, my);
+  const f = evaluateField(px, py, params);
+  roFn.textContent = FUNCTIONS[params.funcMode].symbol;
+  roOmega.textContent = `${px.toFixed(4)} ${py >= 0 ? '+' : '−'} ${Math.abs(py).toFixed(4)}i`;
+  roVal.textContent = f.toExponential(3);
+}
+
+/* =========================================================================
+   Pointer interaction: pan (drag) + zoom (wheel / pinch)
+   ========================================================================= */
+const pointers = new Map();
+let dragging = false;
+let pinchDist = 0;
+
+canvas.addEventListener('pointerdown', (e) => {
+  canvas.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pointers.size === 1) dragging = true;
+  else if (pointers.size === 2) { dragging = false; pinchDist = getPinchDist(); }
+});
+canvas.addEventListener('pointermove', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  if (!pointers.has(e.pointerId)) {
+    updateReadout(e.clientX - rect.left, e.clientY - rect.top);
+    return;
+  }
+  const prev = pointers.get(e.pointerId);
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+  if (pointers.size === 1 && dragging) {
+    const dx = e.clientX - prev.x, dy = e.clientY - prev.y;
+    params.center[0] -= dx / (canvas.clientHeight * params.zoom);
+    params.center[1] += dy / (canvas.clientHeight * params.zoom);
+    updateReadout(e.clientX - rect.left, e.clientY - rect.top);
+  } else if (pointers.size === 2) {
+    const newDist = getPinchDist();
+    if (pinchDist > 0) {
+      const ratio = newDist / pinchDist;
+      params.zoom = Math.max(0.01, Math.min(200, params.zoom * ratio));
+      syncSlider('s-zoom', params.zoom, 'v-zoom', (v) => v.toFixed(2) + '×');
+    }
+    pinchDist = newDist;
+  }
+});
+function endPointer(e) {
+  pointers.delete(e.pointerId);
+  if (pointers.size < 2) pinchDist = 0;
+  if (pointers.size === 0 && dragging) { dragging = false; scheduleRecomputeMax(); syncCenterSliders(); }
+}
+canvas.addEventListener('pointerup', endPointer);
+canvas.addEventListener('pointercancel', endPointer);
+canvas.addEventListener('pointerleave', (e) => { if (pointers.size === 0) { } });
+
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const factor = Math.pow(1.1, -e.deltaY / 100);
+  params.zoom = Math.max(0.01, Math.min(200, params.zoom * factor));
+  syncSlider('s-zoom', params.zoom, 'v-zoom', (v) => v.toFixed(2) + '×');
+  scheduleRecomputeMax();
+}, { passive: false });
+
+function getPinchDist() {
+  const pts = [...pointers.values()];
+  return Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+}
+
+/* =========================================================================
+   Control deck wiring
+   ========================================================================= */
+function syncSlider(id, value, labelId, fmt) {
+  document.getElementById(id).value = value;
+  document.getElementById(labelId).textContent = fmt(value);
+}
+function syncCenterSliders() {
+  syncSlider('s-cx', params.center[0], 'v-cx', (v) => v.toFixed(2));
+  syncSlider('s-cy', params.center[1], 'v-cy', (v) => v.toFixed(2));
+}
+
+function bindSlider(id, labelId, key, fmt, onChange) {
+  const el = document.getElementById(id);
+  const lbl = document.getElementById(labelId);
+  el.addEventListener('input', () => {
+    const v = parseFloat(el.value);
+    if (key === 'cx') params.center[0] = v;
+    else if (key === 'cy') params.center[1] = v;
+    else params[key] = v;
+    lbl.textContent = fmt(v);
+    if (onChange) onChange();
+    scheduleRecomputeMax(30);
+  });
+}
+bindSlider('s-V', 'v-V', 'V', (v) => v.toFixed(2));
+bindSlider('s-m', 'v-m', 'm', (v) => v.toFixed(2));
+bindSlider('s-Lp', 'v-Lp', 'Lp', (v) => v.toFixed(2));
+bindSlider('s-Lm', 'v-Lm', 'Lm', (v) => v.toFixed(2));
+bindSlider('s-zoom', 'v-zoom', 'zoom', (v) => v.toFixed(2) + '×');
+bindSlider('s-cx', 'v-cx', 'cx', (v) => v.toFixed(2));
+bindSlider('s-cy', 'v-cy', 'cy', (v) => v.toFixed(2));
+bindSlider('s-manual', 'v-manual', 'manualMaxValue', (v) => v.toFixed(3));
+
+const funcSelect = document.getElementById('func-select');
+FUNCTIONS.forEach((fn, i) => {
+  const opt = document.createElement('option');
+  opt.value = String(i);
+  opt.textContent = fn.label;
+  funcSelect.appendChild(opt);
+});
+funcSelect.value = String(params.funcMode);
+funcSelect.addEventListener('change', () => setFunc(parseInt(funcSelect.value, 10)));
+
+function setFunc(mode) {
+  params.funcMode = mode;
+  funcSelect.value = String(mode);
+  computeValueMax();
+}
+
+function bindSwitch(id, key) {
+  const el = document.getElementById(id);
+  el.addEventListener('click', () => {
+    params[key] = !params[key];
+    el.classList.toggle('on', params[key]);
+    if (key === 'manualMaxEnabled') {
+      document.getElementById('row-manual').style.display = params.manualMaxEnabled ? 'block' : 'none';
+      updateLegend();
+    }
+    if (key === 'showLegend') {
+      legendEl.classList.toggle('hidden', !params.showLegend);
+    }
+  });
+}
+bindSwitch('t-axes', 'showAxes');
+bindSwitch('t-legend', 'showLegend');
+bindSwitch('t-manual', 'manualMaxEnabled');
+
+document.getElementById('btn-reset').addEventListener('click', () => {
+  params.center = [0, 0];
+  params.zoom = 1.0;
+  syncCenterSliders();
+  syncSlider('s-zoom', 1.0, 'v-zoom', (v) => v.toFixed(2) + '×');
+  scheduleRecomputeMax(0);
+});
+
+/* deck show/hide */
+const deck = document.getElementById('deck');
+const fab = document.getElementById('fab');
+function toggleDeck() { deck.classList.toggle('hidden'); }
+fab.addEventListener('click', toggleDeck);
+document.getElementById('deck-close').addEventListener('click', toggleDeck);
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') toggleDeck();
+});
+
+/* =========================================================================
+   Boot
+   ========================================================================= */
+sizeCanvases();
+drawLegendBar();
+computeValueMax();
+requestAnimationFrame(render);
+</script>
+</body>
+</html>
